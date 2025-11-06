@@ -882,46 +882,57 @@ ${closingGreeting}`;
           console.log('📤 Submitting checklist:', submissionData);
           
           try {
-            // Save to Data SDK
-            const result = await window.dataSdk.create(submissionData);
+            // Generate and send WhatsApp report first
+            const reportMessage = generateWhatsAppReport(submissionData);
+            console.log('📝 Generated report message:', reportMessage);
             
-            if (result.isOk) {
-              showToast('Checklist berhasil disimpan!', 'success');
-              
-              // Generate and send WhatsApp report
-              const reportMessage = generateWhatsAppReport(submissionData);
-              console.log('📝 Generated report message:', reportMessage);
-              
-              // Send WhatsApp report
-              await sendWhatsAppReport(reportMessage);
-              
-              // Reset everything and return to login
-              setTimeout(() => {
-                currentUser = null;
-                currentShift = null;
-                
-                // Reset all forms and states
-                resetAllForms();
-                
-                // Show login section
-                document.getElementById('loginSection').classList.remove('hidden');
-                document.getElementById('dashboardSection').classList.add('hidden');
-                
-                // Reset login form
-                document.getElementById('loginForm').reset();
-                document.getElementById('leaderName').disabled = true;
-                document.getElementById('leaderName').innerHTML = '<option value="">-- Pilih divisi terlebih dahulu --</option>';
-                
-                showToast('Sistem telah direset. Silakan login kembali.', 'info');
-              }, 3000); // Extended to 3 seconds to allow WhatsApp sending
-              
+            // Send WhatsApp report
+            const whatsappSent = await sendWhatsAppReport(reportMessage);
+            
+            // Try to save to Data SDK if available, but don't fail if not available
+            if (window.dataSdk && typeof window.dataSdk.create === 'function') {
+              try {
+                const result = await window.dataSdk.create(submissionData);
+                if (result.isOk) {
+                  console.log('✅ Data also saved to Canva Sheet');
+                }
+              } catch (sdkError) {
+                console.log('⚠️ Data SDK not available, but WhatsApp report sent');
+              }
             } else {
-              throw new Error(result.error.message);
+              console.log('⚠️ Data SDK not available in this environment');
             }
+            
+            // Show success message regardless of Data SDK
+            if (whatsappSent) {
+              showToast('Laporan berhasil dikirim ke WhatsApp!', 'success');
+            } else {
+              showToast('Checklist berhasil disubmit!', 'success');
+            }
+            
+            // Reset everything and return to login
+            setTimeout(() => {
+              currentUser = null;
+              currentShift = null;
+              
+              // Reset all forms and states
+              resetAllForms();
+              
+              // Show login section
+              document.getElementById('loginSection').classList.remove('hidden');
+              document.getElementById('dashboardSection').classList.add('hidden');
+              
+              // Reset login form
+              document.getElementById('loginForm').reset();
+              document.getElementById('leaderName').disabled = true;
+              document.getElementById('leaderName').innerHTML = '<option value="">-- Pilih divisi terlebih dahulu --</option>';
+              
+              showToast('Sistem telah direset. Silakan login kembali.', 'info');
+            }, 3000);
             
           } catch (error) {
             console.error('❌ Error submitting checklist:', error);
-            showToast('Gagal menyimpan checklist. Silakan coba lagi.', 'error');
+            showToast('Gagal memproses checklist. Silakan coba lagi.', 'error');
           }
         }
 
@@ -1006,20 +1017,24 @@ ${closingGreeting}`;
         document.addEventListener('DOMContentLoaded', async function() {
           console.log('🎯 DOM loaded, initializing...');
           
-          // Initialize Data SDK
-          try {
-            const initResult = await window.dataSdk.init(dataHandler);
-            if (initResult.isOk) {
-              console.log('✅ Data SDK initialized successfully');
-            } else {
-              console.error('❌ Data SDK initialization failed:', initResult.error);
+          // Initialize Data SDK (optional - only if available)
+          if (window.dataSdk && typeof window.dataSdk.init === 'function') {
+            try {
+              const initResult = await window.dataSdk.init(dataHandler);
+              if (initResult.isOk) {
+                console.log('✅ Data SDK initialized successfully');
+              } else {
+                console.error('❌ Data SDK initialization failed:', initResult.error);
+              }
+            } catch (error) {
+              console.error('❌ Data SDK error:', error);
             }
-          } catch (error) {
-            console.error('❌ Data SDK error:', error);
+          } else {
+            console.log('⚠️ Data SDK not available - running without data persistence');
           }
           
-          // Initialize Element SDK
-          if (window.elementSdk) {
+          // Initialize Element SDK (optional - only if available)
+          if (window.elementSdk && typeof window.elementSdk.init === 'function') {
             try {
               await window.elementSdk.init({
                 defaultConfig,
@@ -1031,12 +1046,13 @@ ${closingGreeting}`;
             } catch (error) {
               console.error('❌ Element SDK error:', error);
             }
+          } else {
+            console.log('⚠️ Element SDK not available - running with default styling');
           }
           
           // Initialize main application
           await init();
         });
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99a5f6e7240fb5ba',t:'MTc2MjQ0NjUxMS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
-
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99a607a611164ab7',t:'MTc2MjQ0NzE5Ny4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
