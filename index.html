@@ -856,76 +856,154 @@ ${closingGreeting}`;
           return message;
         }
 
-        // Upload photo to Google Drive via Apps Script - FIXED VERSION
+        // Upload photo to Google Drive via Apps Script - CORS-Compatible Method
         async function uploadPhotoToGoogleDrive(file, fileName, jobName) {
           try {
-            console.log(`📸 Uploading ${fileName} to Google Drive...`);
+            console.log(`📸 Starting upload for ${fileName}...`);
+            
+            // Validate inputs
+            if (!file || !fileName || !jobName) {
+              throw new Error('Missing required parameters: file, fileName, or jobName');
+            }
+            
+            if (!currentUser || !currentUser.name || !currentUser.division) {
+              throw new Error('Current user data is incomplete');
+            }
             
             // Convert file to base64
             const base64Data = await new Promise((resolve, reject) => {
               const reader = new FileReader();
               reader.onload = () => {
-                const base64 = reader.result.split(',')[1]; // Remove data:image/jpeg;base64, prefix
-                resolve(base64);
+                try {
+                  const result = reader.result;
+                  if (!result || typeof result !== 'string') {
+                    reject(new Error('Failed to read file as base64'));
+                    return;
+                  }
+                  
+                  const base64 = result.split(',')[1]; // Remove data:image/jpeg;base64, prefix
+                  if (!base64) {
+                    reject(new Error('Invalid base64 data'));
+                    return;
+                  }
+                  
+                  resolve(base64);
+                } catch (error) {
+                  reject(error);
+                }
               };
-              reader.onerror = reject;
+              reader.onerror = () => reject(new Error('FileReader error'));
               reader.readAsDataURL(file);
             });
             
-            // Prepare FormData for CORS compatibility
-            const formData = new FormData();
-            formData.append('data', JSON.stringify({
-              action: 'uploadPhoto',
-              fileData: base64Data,
-              fileName: fileName,
-              jobName: jobName,
-              leader: currentUser.name,
-              division: currentUser.division,
-              shift: currentShift,
-              timestamp: new Date().toISOString(),
-              mimeType: file.type || 'image/jpeg'
-            }));
+            // Create simplified filename with leader name included
+            const today = new Date();
+            const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+            const timeStr = today.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS format
             
-            // Try upload with FormData (better CORS compatibility)
-            try {
-              console.log(`🔄 Attempting FormData upload for ${fileName}...`);
-              
-              const response = await fetch('https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec', {
-                method: 'POST',
-                body: formData
-              });
-              
-              if (response.ok) {
-                const result = await response.json();
-                if (result.success) {
-                  console.log(`✅ Photo ${fileName} uploaded successfully:`, result.fileUrl);
-                  return {
-                    success: true,
-                    fileUrl: result.fileUrl,
-                    fileId: result.fileId,
-                    fileName: result.fileName
-                  };
-                } else {
-                  console.error(`❌ Upload failed for ${fileName}:`, result);
-                  return {
+            // Clean up names for filename (remove spaces and special characters)
+            const cleanLeaderName = currentUser.name.replace(/[^a-zA-Z0-9]/g, '');
+            const cleanJobName = jobName.replace(/[^a-zA-Z0-9]/g, '');
+            
+            // Simplified filename: Division_LeaderName_JobName_BeforeAfter_Date_Time.jpg
+            const simplifiedFileName = `${currentUser.division.toUpperCase()}_${cleanLeaderName}_${cleanJobName}_${fileName.includes('before') ? 'Before' : 'After'}_${dateStr}_${timeStr}.jpg`;
+            
+            console.log(`📋 Prepared filename: ${simplifiedFileName}`);
+            
+            // Use JSONP-style approach with dynamic script injection (CORS-free method)
+            return new Promise((resolve, reject) => {
+              try {
+                // Create a unique callback name
+                const callbackName = `uploadCallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
+                // Create the callback function
+                window[callbackName] = function(result) {
+                  // Clean up
+                  delete window[callbackName];
+                  if (script && script.parentNode) {
+                    script.parentNode.removeChild(script);
+                  }
+                  
+                  console.log(`📤 Upload response for ${simplifiedFileName}:`, result);
+                  
+                  if (result && result.success) {
+                    console.log(`✅ Photo ${simplifiedFileName} uploaded successfully`);
+                    resolve({
+                      success: true,
+                      fileUrl: result.fileUrl,
+                      fileId: result.fileId,
+                      fileName: result.fileName || simplifiedFileName,
+                      method: 'JSONP'
+                    });
+                  } else {
+                    console.error(`❌ Upload failed for ${simplifiedFileName}:`, result);
+                    resolve({
+                      success: false,
+                      error: result?.error || 'Upload failed',
+                      fileName: simplifiedFileName
+                    });
+                  }
+                };
+                
+                // Prepare upload data
+                const uploadData = {
+                  action: 'uploadPhoto',
+                  fileData: base64Data,
+                  fileName: simplifiedFileName,
+                  jobName: jobName,
+                  leader: currentUser.name,
+                  division: currentUser.division,
+                  shift: currentShift,
+                  timestamp: new Date().toISOString(),
+                  mimeType: file.type || 'image/jpeg',
+                  fileSize: file.size || 0,
+                  callback: callbackName
+                };
+                
+                // Create script element for JSONP
+                const script = document.createElement('script');
+                const encodedData = encodeURIComponent(JSON.stringify(uploadData));
+                script.src = `https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec?data=${encodedData}`;
+                
+                // Handle script load errors
+                script.onerror = function() {
+                  console.error(`❌ Script load failed for ${simplifiedFileName}`);
+                  delete window[callbackName];
+                  if (script && script.parentNode) {
+                    script.parentNode.removeChild(script);
+                  }
+                  resolve({
                     success: false,
-                    error: result.error || 'Upload failed'
-                  };
-                }
-              } else {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    error: 'Network error - script load failed',
+                    fileName: simplifiedFileName
+                  });
+                };
+                
+                // Set timeout for upload
+                setTimeout(() => {
+                  if (window[callbackName]) {
+                    console.error(`❌ Upload timeout for ${simplifiedFileName}`);
+                    delete window[callbackName];
+                    if (script && script.parentNode) {
+                      script.parentNode.removeChild(script);
+                    }
+                    resolve({
+                      success: false,
+                      error: 'Upload timeout (30 seconds)',
+                      fileName: simplifiedFileName
+                    });
+                  }
+                }, 30000); // 30 second timeout
+                
+                // Add script to document to trigger the request
+                document.head.appendChild(script);
+                console.log(`🔄 JSONP upload initiated for ${simplifiedFileName}`);
+                
+              } catch (error) {
+                console.error(`❌ JSONP setup error for ${simplifiedFileName}:`, error);
+                reject(error);
               }
-              
-            } catch (uploadError) {
-              console.error(`❌ Upload error for ${fileName}:`, uploadError);
-              
-              // Return failure but don't break the entire process
-              return {
-                success: false,
-                error: `Upload failed: ${uploadError.message}`,
-                fileName: fileName
-              };
-            }
+            });
             
           } catch (error) {
             console.error(`❌ Error processing ${fileName}:`, error);
@@ -995,8 +1073,8 @@ ${closingGreeting}`;
 
         // Send WhatsApp message via Fonnte
         async function sendWhatsAppReport(message) {
-          const FONNTE_TOKEN = 'C9BxKbVQyGzp5JRxG1re'; // Ganti dengan token Fonnte Anda
-          const TARGET_NUMBER = '120363422961733756@g.us	'; // Ganti dengan nomor tujuan
+          const FONNTE_TOKEN = 'your_fonnte_token_here'; // Ganti dengan token Fonnte Anda
+          const TARGET_NUMBER = '6281234567890'; // Ganti dengan nomor tujuan
           
           try {
             console.log('📱 Sending WhatsApp report...');
@@ -1326,5 +1404,5 @@ ${closingGreeting}`;
           await init();
         });
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99acef416347d9e4',t:'MTc2MjUxOTU5OC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99ad0311a1e86d1c',t:'MTc2MjUyMDQxMC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
