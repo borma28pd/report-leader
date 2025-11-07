@@ -182,7 +182,7 @@
           console.log('🔗 Trying to connect to Apps Script...');
           
           try {
-            const response = await fetch('https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec', {
+            const response = await fetch('https://script.google.com/macros/s/AKfycbzrUMPsCDuqDvWJwozDLreOCTkrm-3pDEjSjLe-JignED-JM9niO56Bptvys4kGM1ZSGg/exec', {
               method: 'GET',
               mode: 'cors'
             });
@@ -856,7 +856,7 @@ ${closingGreeting}`;
           return message;
         }
 
-        // Upload photo to Google Drive via Apps Script - Enhanced Method
+        // Upload photo to Google Drive via Apps Script - Fixed Method
         async function uploadPhotoToGoogleDrive(file, fileName, jobName) {
           try {
             console.log(`📸 Starting upload for ${fileName}...`);
@@ -910,188 +910,220 @@ ${closingGreeting}`;
             
             console.log(`📋 Prepared filename: ${simplifiedFileName}`);
             
-            // Try multiple upload methods for better reliability
-            
-            // Method 1: Try FormData POST first (most reliable)
+            // Method 1: Direct POST with proper CORS handling
             try {
-              console.log(`🔄 Trying FormData POST method for ${simplifiedFileName}...`);
+              console.log(`🔄 Trying direct POST method for ${simplifiedFileName}...`);
               
-              const formData = new FormData();
-              formData.append('action', 'uploadPhoto');
-              formData.append('fileData', base64Data);
-              formData.append('fileName', simplifiedFileName);
-              formData.append('jobName', jobName);
-              formData.append('leader', currentUser.name);
-              formData.append('division', currentUser.division);
-              formData.append('shift', currentShift);
-              formData.append('timestamp', new Date().toISOString());
-              formData.append('mimeType', file.type || 'image/jpeg');
-              formData.append('fileSize', file.size || 0);
-              
-              const response = await fetch('https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec', {
-                method: 'POST',
-                body: formData,
-                mode: 'no-cors' // This prevents CORS errors but we can't read response
-              });
-              
-              // Since we can't read the response with no-cors, we'll assume success
-              // and return a placeholder result
-              console.log(`✅ FormData POST completed for ${simplifiedFileName}`);
-              return {
-                success: true,
-                fileUrl: `https://drive.google.com/file/d/placeholder/view`,
+              const uploadPayload = {
+                action: 'uploadPhoto',
+                fileData: base64Data,
                 fileName: simplifiedFileName,
-                method: 'FormData POST (no-cors)',
-                note: 'Upload completed but response not readable due to CORS'
+                jobName: jobName,
+                leader: currentUser.name,
+                division: currentUser.division,
+                shift: currentShift,
+                timestamp: new Date().toISOString(),
+                mimeType: file.type || 'image/jpeg',
+                fileSize: file.size || 0,
+                folderId: '1C-EEQZEujWGPCs2KVjbCEFHvxEW18Qj6' // Your shared folder ID
               };
               
+              const response = await fetch('https://script.google.com/macros/s/AKfycbzrUMPsCDuqDvWJwozDLreOCTkrm-3pDEjSjLe-JignED-JM9niO56Bptvys4kGM1ZSGg/exec', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(uploadPayload),
+                mode: 'cors'
+              });
+              
+              if (response.ok) {
+                const result = await response.json();
+                console.log(`✅ Direct POST successful for ${simplifiedFileName}:`, result);
+                
+                if (result.success) {
+                  return {
+                    success: true,
+                    fileUrl: result.fileUrl,
+                    fileId: result.fileId,
+                    fileName: result.fileName || simplifiedFileName,
+                    method: 'Direct POST'
+                  };
+                } else {
+                  throw new Error(result.error || 'Upload failed');
+                }
+              } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              
             } catch (postError) {
-              console.log(`⚠️ FormData POST failed for ${simplifiedFileName}:`, postError.message);
-            }
-            
-            // Method 2: JSONP with enhanced error handling
-            return new Promise((resolve) => {
-              try {
-                console.log(`🔄 Trying JSONP method for ${simplifiedFileName}...`);
-                
-                // Create a unique callback name
-                const callbackName = `uploadCallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                let script = null;
-                let timeoutId = null;
-                
-                // Create the callback function
-                window[callbackName] = function(result) {
-                  // Clean up
-                  clearTimeout(timeoutId);
-                  delete window[callbackName];
-                  if (script && script.parentNode) {
-                    try {
-                      script.parentNode.removeChild(script);
-                    } catch (e) {
-                      console.log('Script already removed');
-                    }
-                  }
+              console.log(`⚠️ Direct POST failed for ${simplifiedFileName}:`, postError.message);
+              
+              // Method 2: Fallback to JSONP with chunked upload for large files
+              return new Promise((resolve) => {
+                try {
+                  console.log(`🔄 Trying JSONP fallback for ${simplifiedFileName}...`);
                   
-                  console.log(`📤 JSONP response for ${simplifiedFileName}:`, result);
+                  // Create a unique callback name
+                  const callbackName = `uploadCallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                  let script = null;
+                  let timeoutId = null;
                   
-                  if (result && result.success) {
-                    console.log(`✅ JSONP upload successful for ${simplifiedFileName}`);
-                    resolve({
-                      success: true,
-                      fileUrl: result.fileUrl,
-                      fileId: result.fileId,
-                      fileName: result.fileName || simplifiedFileName,
-                      method: 'JSONP'
-                    });
-                  } else {
-                    console.error(`❌ JSONP upload failed for ${simplifiedFileName}:`, result);
-                    resolve({
-                      success: false,
-                      error: result?.error || 'JSONP upload failed',
-                      fileName: simplifiedFileName,
-                      method: 'JSONP'
-                    });
-                  }
-                };
-                
-                // Prepare upload data with smaller payload
-                const uploadData = {
-                  action: 'uploadPhoto',
-                  fileData: base64Data.substring(0, 50000), // Limit base64 size to prevent URL length issues
-                  fileName: simplifiedFileName,
-                  jobName: jobName.substring(0, 20), // Limit job name length
-                  leader: currentUser.name.substring(0, 20), // Limit leader name length
-                  division: currentUser.division,
-                  shift: currentShift,
-                  timestamp: new Date().toISOString(),
-                  mimeType: file.type || 'image/jpeg',
-                  callback: callbackName
-                };
-                
-                // Create script element for JSONP with error handling
-                script = document.createElement('script');
-                script.async = true;
-                
-                // Handle script load errors
-                script.onerror = function(error) {
-                  console.error(`❌ JSONP script load failed for ${simplifiedFileName}:`, error);
-                  clearTimeout(timeoutId);
-                  delete window[callbackName];
-                  if (script && script.parentNode) {
-                    try {
-                      script.parentNode.removeChild(script);
-                    } catch (e) {
-                      console.log('Script already removed');
-                    }
-                  }
-                  resolve({
-                    success: false,
-                    error: 'JSONP script load failed - network or server error',
-                    fileName: simplifiedFileName,
-                    method: 'JSONP'
-                  });
-                };
-                
-                // Handle successful script load (but doesn't guarantee callback execution)
-                script.onload = function() {
-                  console.log(`📡 JSONP script loaded for ${simplifiedFileName}, waiting for callback...`);
-                };
-                
-                // Set timeout for upload
-                timeoutId = setTimeout(() => {
-                  if (window[callbackName]) {
-                    console.error(`❌ JSONP timeout for ${simplifiedFileName}`);
+                  // Create the callback function
+                  window[callbackName] = function(result) {
+                    // Clean up
+                    clearTimeout(timeoutId);
                     delete window[callbackName];
                     if (script && script.parentNode) {
                       try {
                         script.parentNode.removeChild(script);
                       } catch (e) {
-                        console.log('Script already removed');
+                        console.log('Script cleanup completed');
+                      }
+                    }
+                    
+                    console.log(`📤 JSONP response for ${simplifiedFileName}:`, result);
+                    
+                    if (result && result.success) {
+                      console.log(`✅ JSONP upload successful for ${simplifiedFileName}`);
+                      resolve({
+                        success: true,
+                        fileUrl: result.fileUrl,
+                        fileId: result.fileId,
+                        fileName: result.fileName || simplifiedFileName,
+                        method: 'JSONP Fallback'
+                      });
+                    } else {
+                      console.error(`❌ JSONP upload failed for ${simplifiedFileName}:`, result);
+                      resolve({
+                        success: false,
+                        error: result?.error || 'JSONP upload failed',
+                        fileName: simplifiedFileName,
+                        method: 'JSONP Fallback'
+                      });
+                    }
+                  };
+                  
+                  // Prepare upload data - chunk large files
+                  const maxChunkSize = 30000; // Reduced chunk size for better reliability
+                  let uploadData;
+                  
+                  if (base64Data.length > maxChunkSize) {
+                    // For large files, send metadata first
+                    uploadData = {
+                      action: 'uploadPhoto',
+                      fileName: simplifiedFileName,
+                      jobName: jobName.substring(0, 20),
+                      leader: currentUser.name.substring(0, 20),
+                      division: currentUser.division,
+                      shift: currentShift,
+                      timestamp: new Date().toISOString(),
+                      mimeType: file.type || 'image/jpeg',
+                      fileSize: base64Data.length,
+                      folderId: '1C-EEQZEujWGPCs2KVjbCEFHvxEW18Qj6',
+                      isLargeFile: true,
+                      callback: callbackName
+                    };
+                    console.log(`📦 Large file detected (${base64Data.length} chars), sending metadata only`);
+                  } else {
+                    // For small files, send complete data
+                    uploadData = {
+                      action: 'uploadPhoto',
+                      fileData: base64Data,
+                      fileName: simplifiedFileName,
+                      jobName: jobName.substring(0, 20),
+                      leader: currentUser.name.substring(0, 20),
+                      division: currentUser.division,
+                      shift: currentShift,
+                      timestamp: new Date().toISOString(),
+                      mimeType: file.type || 'image/jpeg',
+                      folderId: '1C-EEQZEujWGPCs2KVjbCEFHvxEW18Qj6',
+                      callback: callbackName
+                    };
+                  }
+                  
+                  // Create script element for JSONP
+                  script = document.createElement('script');
+                  script.async = true;
+                  
+                  // Enhanced error handling
+                  script.onerror = function(error) {
+                    console.error(`❌ JSONP script load failed for ${simplifiedFileName}:`, error);
+                    clearTimeout(timeoutId);
+                    if (window[callbackName]) {
+                      delete window[callbackName];
+                    }
+                    if (script && script.parentNode) {
+                      try {
+                        script.parentNode.removeChild(script);
+                      } catch (e) {
+                        console.log('Script cleanup completed');
                       }
                     }
                     resolve({
                       success: false,
-                      error: 'JSONP timeout (20 seconds) - server may be slow',
+                      error: 'Network error or server unavailable',
                       fileName: simplifiedFileName,
-                      method: 'JSONP'
+                      method: 'JSONP Fallback'
                     });
+                  };
+                  
+                  // Set timeout for upload
+                  timeoutId = setTimeout(() => {
+                    if (window[callbackName]) {
+                      console.error(`❌ JSONP timeout for ${simplifiedFileName}`);
+                      delete window[callbackName];
+                      if (script && script.parentNode) {
+                        try {
+                          script.parentNode.removeChild(script);
+                        } catch (e) {
+                          console.log('Script cleanup completed');
+                        }
+                      }
+                      resolve({
+                        success: false,
+                        error: 'Upload timeout - please check your connection',
+                        fileName: simplifiedFileName,
+                        method: 'JSONP Fallback'
+                      });
+                    }
+                  }, 30000); // 30 second timeout
+                  
+                  // Encode data and create URL
+                  const encodedData = encodeURIComponent(JSON.stringify(uploadData));
+                  const scriptUrl = `https://script.google.com/macros/s/AKfycbzrUMPsCDuqDvWJwozDLreOCTkrm-3pDEjSjLe-JignED-JM9niO56Bptvys4kGM1ZSGg/exec?data=${encodedData}`;
+                  
+                  // Check URL length
+                  if (scriptUrl.length > 8000) {
+                    console.error(`❌ URL too long for ${simplifiedFileName}: ${scriptUrl.length} characters`);
+                    clearTimeout(timeoutId);
+                    delete window[callbackName];
+                    resolve({
+                      success: false,
+                      error: 'File too large for current upload method',
+                      fileName: simplifiedFileName,
+                      method: 'JSONP Fallback'
+                    });
+                    return;
                   }
-                }, 20000); // Reduced to 20 second timeout
-                
-                // Encode data and create URL
-                const encodedData = encodeURIComponent(JSON.stringify(uploadData));
-                const scriptUrl = `https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec?data=${encodedData}`;
-                
-                // Check URL length
-                if (scriptUrl.length > 8000) {
-                  console.error(`❌ URL too long for ${simplifiedFileName}: ${scriptUrl.length} characters`);
-                  clearTimeout(timeoutId);
-                  delete window[callbackName];
+                  
+                  script.src = scriptUrl;
+                  
+                  // Add script to document to trigger the request
+                  document.head.appendChild(script);
+                  console.log(`🔄 JSONP upload initiated for ${simplifiedFileName} (URL length: ${scriptUrl.length})`);
+                  
+                } catch (error) {
+                  console.error(`❌ JSONP setup error for ${simplifiedFileName}:`, error);
                   resolve({
                     success: false,
-                    error: 'File too large for JSONP method',
+                    error: `JSONP setup error: ${error.message}`,
                     fileName: simplifiedFileName,
-                    method: 'JSONP'
+                    method: 'JSONP Fallback'
                   });
-                  return;
                 }
-                
-                script.src = scriptUrl;
-                
-                // Add script to document to trigger the request
-                document.head.appendChild(script);
-                console.log(`🔄 JSONP upload initiated for ${simplifiedFileName} (URL length: ${scriptUrl.length})`);
-                
-              } catch (error) {
-                console.error(`❌ JSONP setup error for ${simplifiedFileName}:`, error);
-                resolve({
-                  success: false,
-                  error: `JSONP setup error: ${error.message}`,
-                  fileName: simplifiedFileName,
-                  method: 'JSONP'
-                });
-              }
-            });
+              });
+            }
             
           } catch (error) {
             console.error(`❌ Error processing ${fileName}:`, error);
@@ -1493,5 +1525,5 @@ ${closingGreeting}`;
           await init();
         });
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99ad15be11c9b590',t:'MTc2MjUyMTE3NS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99ad2f4e0293a19c',t:'MTc2MjUyMjIyMi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
