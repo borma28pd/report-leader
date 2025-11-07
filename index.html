@@ -856,7 +856,7 @@ ${closingGreeting}`;
           return message;
         }
 
-        // Upload photo to Google Drive via Apps Script
+        // Upload photo to Google Drive via Apps Script - FIXED VERSION
         async function uploadPhotoToGoogleDrive(file, fileName, jobName) {
           try {
             console.log(`📸 Uploading ${fileName} to Google Drive...`);
@@ -872,8 +872,9 @@ ${closingGreeting}`;
               reader.readAsDataURL(file);
             });
             
-            // Prepare data for Apps Script
-            const uploadData = {
+            // Prepare FormData for CORS compatibility
+            const formData = new FormData();
+            formData.append('data', JSON.stringify({
               action: 'uploadPhoto',
               fileData: base64Data,
               fileName: fileName,
@@ -883,39 +884,55 @@ ${closingGreeting}`;
               shift: currentShift,
               timestamp: new Date().toISOString(),
               mimeType: file.type || 'image/jpeg'
-            };
+            }));
             
-            const response = await fetch('https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(uploadData)
-            });
-            
-            const result = await response.json();
-            
-            if (response.ok && result.success) {
-              console.log(`✅ Photo ${fileName} uploaded successfully:`, result.fileUrl);
-              return {
-                success: true,
-                fileUrl: result.fileUrl,
-                fileId: result.fileId,
-                fileName: result.fileName
-              };
-            } else {
-              console.error(`❌ Failed to upload ${fileName}:`, result);
+            // Try upload with FormData (better CORS compatibility)
+            try {
+              console.log(`🔄 Attempting FormData upload for ${fileName}...`);
+              
+              const response = await fetch('https://script.google.com/macros/s/AKfycbwAcs-_h6SNPoZObj9NZSDLuYrrnTGodXzv_cuJ963nqGhQ_JxlPRU9RQFsALy_9rlt/exec', {
+                method: 'POST',
+                body: formData
+              });
+              
+              if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                  console.log(`✅ Photo ${fileName} uploaded successfully:`, result.fileUrl);
+                  return {
+                    success: true,
+                    fileUrl: result.fileUrl,
+                    fileId: result.fileId,
+                    fileName: result.fileName
+                  };
+                } else {
+                  console.error(`❌ Upload failed for ${fileName}:`, result);
+                  return {
+                    success: false,
+                    error: result.error || 'Upload failed'
+                  };
+                }
+              } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              
+            } catch (uploadError) {
+              console.error(`❌ Upload error for ${fileName}:`, uploadError);
+              
+              // Return failure but don't break the entire process
               return {
                 success: false,
-                error: result.error || 'Upload failed'
+                error: `Upload failed: ${uploadError.message}`,
+                fileName: fileName
               };
             }
             
           } catch (error) {
-            console.error(`❌ Error uploading ${fileName}:`, error);
+            console.error(`❌ Error processing ${fileName}:`, error);
             return {
               success: false,
-              error: error.message
+              error: error.message,
+              fileName: fileName
             };
           }
         }
@@ -931,7 +948,7 @@ ${closingGreeting}`;
             after: null
           };
           
-          // Show upload status
+          // Show upload status if there are photos to upload
           if (statusDiv && (beforeInput?.files[0] || afterInput?.files[0])) {
             statusDiv.classList.remove('hidden');
           }
@@ -942,6 +959,7 @@ ${closingGreeting}`;
               const beforeFile = beforeInput.files[0];
               const beforeFileName = `${currentUser.division}_${currentUser.name}_${jobName}_before_${new Date().getTime()}.jpg`;
               
+              console.log(`📸 Processing before photo: ${beforeFileName}`);
               const beforeResult = await uploadPhotoToGoogleDrive(beforeFile, beforeFileName, jobName);
               uploadResults.before = beforeResult;
             }
@@ -951,6 +969,7 @@ ${closingGreeting}`;
               const afterFile = afterInput.files[0];
               const afterFileName = `${currentUser.division}_${currentUser.name}_${jobName}_after_${new Date().getTime()}.jpg`;
               
+              console.log(`📸 Processing after photo: ${afterFileName}`);
               const afterResult = await uploadPhotoToGoogleDrive(afterFile, afterFileName, jobName);
               uploadResults.after = afterResult;
             }
@@ -977,7 +996,7 @@ ${closingGreeting}`;
         // Send WhatsApp message via Fonnte
         async function sendWhatsAppReport(message) {
           const FONNTE_TOKEN = 'C9BxKbVQyGzp5JRxG1re'; // Ganti dengan token Fonnte Anda
-          const TARGET_NUMBER = '120363422961733756@g.us'; // Ganti dengan nomor tujuan
+          const TARGET_NUMBER = '120363422961733756@g.us	'; // Ganti dengan nomor tujuan
           
           try {
             console.log('📱 Sending WhatsApp report...');
@@ -1101,9 +1120,23 @@ ${closingGreeting}`;
             });
             
             // Wait for all photo uploads to complete
-            showToast('Mengupload foto ke Google Drive...', 'info');
+            if (jobdeskPromises.length > 0) {
+              showToast('Mengupload foto ke Google Drive...', 'info');
+            }
+            
             const jobdeskResults = await Promise.all(jobdeskPromises);
             checkedItems.jobdesk = jobdeskResults;
+            
+            // Check if any photos failed to upload
+            const failedUploads = jobdeskResults.filter(job => 
+              (job.photos?.before && !job.photos.before.success) || 
+              (job.photos?.after && !job.photos.after.success)
+            );
+            
+            if (failedUploads.length > 0) {
+              console.log('⚠️ Some photos failed to upload:', failedUploads);
+              showToast('Beberapa foto gagal diupload, tapi laporan tetap akan dikirim', 'info');
+            }
             
             // Create submission data
             const submissionData = {
@@ -1293,5 +1326,5 @@ ${closingGreeting}`;
           await init();
         });
     </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99acd993a66e008f',t:'MTc2MjUxODcxMC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'99acef416347d9e4',t:'MTc2MjUxOTU5OC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
